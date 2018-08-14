@@ -31,7 +31,9 @@ Installation from wheel package
   libgtk2.0-0
   pip install gunicorn Cython tensorflow-gpu==1.8 mxnet-cu90 onnx --user
 
+
 2. Copy the wheel file to your server, and change to that directory.
+::
 
 3. Install Mobius Vision package
 ::
