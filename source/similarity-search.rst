@@ -1,24 +1,9 @@
 Advanced: Similarity Search
 =================================
 
-Overview and work flow
+Overview and Work Flow
 ------------------------
-Mobius Vision SDK provides a powerful similarity search that can be run in just a few steps.
-Please note that there is a difference between the very first usage ("initial phase"), and the usage of similarity search in a running system ("adding samples").
-We provide examples for both cases. In the initial phase, the system is trained on all images that are in the image database.
-When one wants to extend the image database of a running system with new samples, only the added images are analyzed; in addition, the indices of all images are updated. This prevents the computationally heavy training procedure to be carried out again on images that have already been added to the image database.
-
-Initial phase:
-
-#. Adding samples
-#. Index training
-#. Search with query image
-
-Extending the image database of a running system:
-
-#. Adding sample(s)
-#. Updating index/indices
-#. Search with query image
+Mobius Vision SDK provides a powerful similarity search that is easy to set up. In the first part, we detail the steps required to setting up a new image database, and train a similarity search approximator to enable fast and scalable similarity search in large image databases. We also show how new images can be efficiently added to an existing image database, without having to retrain the whole similarity search approximator.
 
 The following illustration shows a simplified view of how the similarity search works.
 
@@ -26,8 +11,10 @@ The following illustration shows a simplified view of how the similarity search 
   data/similarity_search.png
   :align: left
 
-Adding samples
+Getting Started
 --------------
+
+## Adding Images to the Image Database
 
 The first step is to add images to the docker volume by sending a POST request to the following endpoint:
 ::
@@ -38,7 +25,7 @@ where id is an optional argument. Without this argument, the system will generat
 
 .. note::
 
-  The ID numbers for image samples should be unique, since they are used internally to identify the images. We recommend either using numbers, or a combination of numbers and letters. They should be passed as a string.
+  The IDs for image samples should be unique, since they are used internally to identify the images. We recommend either using numbers, or a combination of numbers and letters. They should be passed as a string.
 
 You can also add samples using the following python script:
 ::
@@ -48,28 +35,46 @@ You can also add samples using the following python script:
         data = {'data': image}
         r = requests.post('http://127.0.0.1:5000/similarity/add?id=%s' % ID, files=data).json()
     return r
+    
+Lastly, here is an example how to use multiprocessing in python to speed things up:
+::
 
-The SDK then processes the added images by extraxting numerical features according to our pre-trained Mobius keywording model. All processed samples are stored in an auxiliary structure we call an "index".
+  from multiprocessing import Pool
+  import requests
+
+  def add_sample(img_path, ID):
+    with open(img_path, 'rb') as image:
+        data = {'data': image}
+        r = requests.post('http://127.0.0.1:5000/similarity/add?id=%s' % ID, files=data).json()
+    return r
+
+  pool = Pool(50)
+  images = [path_to_image1, path_to_iamge2, ...] #List of image paths
+  results = pool.map(add_sample, images)
+  pool.close()
+  pool.join()
+
+When images are added to the database, the SDK processes them by extracting numerical features according to our pre-trained Mobius Vision keywording model. All processed samples are stored in an auxiliary structure.
 
 .. warning::
 
-  This step is computationally expensive. If the number of images is very large (e.g., more than 1 million), it may take more than one day to process all images on a single GPU.
+  This step is computationally expensive. If the number of images is large (e.g., more than 1 million), it may take more than one day to process all images on a single GPU.
 
-Index Training
-------------
 
-For the similarity search, the numerical features extracted in the last step have to be further processed. This so-called "index training" enables fast search and adaptation to the provided image data.
+## Training Similarity Search Approximator
 
-To run index training, send GET request to the following endpoint:
+Once all images have been added to the image dataset, the numerical features extracted in the last step have to be further processed in order to scale to large datasets. Furthermore, the so-called "similarity search approximator" enables fast search and adaptation to the provided image data.
+
+To train the similarity search approximator, send a GET request to the following endpoint:
 ::
 
   curl 127.0.0.1:5000/similarity/train
 
 .. note::
 
-  For a successful index training, you should add at least 1 000 images. However, we recommend to use at least 100 000 images.
+  For a successful similarity search approximator training, you should add at least 1 000 images. However, we recommend to use at least 100 000 images for optimal results.
 
-The request will return a json file with the field task_id. The following command shows how the task_id can be used to get the status of the training:
+The request above will return a json file with the field task_id. The following command shows how the task_id can be used to get the status of the training:
 ::
 
   curl 127.0.0.1:5000/similarity/status/<task_id>
@@ -84,16 +89,15 @@ The following error messages could appear:
 
   Although this process is quite fast, it may take several hours to process all images for large image collections.
 
-Search
-------
+Searching for Similar Images
+----------------------------
 
-After image samples have been added to the docker volume, as well as all samples have been indexed and trained on, the search function can be used.
+Please ensure that you have successfully completed the "getting started" before reading on. That is, you should have added images to the docker volume, and trained the similarity search approximator for all images in the database. If this is the case, you are ready to run the similarity search.
 
 Similarity search with a query image can be used with the following endpoint:
 ::
 
   curl 127.0.0.1:5000/similarity/search -X POST -F "data=@./your_query_img.jpg"
-
 
 Or using this call from a python script:
 ::
@@ -110,8 +114,8 @@ Or using this call from a python script:
 
 The output is split into three parts:
 
-* A list of distances in floating point precision that quanifies the similarity of similar images found. Since the lower distance implies higher similarity, this list is sorted in ascending order.
-* A list of image IDs (as added to the index) of the most similar images, sorted the same way as the first list.
+* A list of distances in floating point precision that quantifies the similarity to the most similar images found. Since lower distance implies higher similarity, this list is sorted in ascending order.
+* A list of image IDs (as specified when images were added to the image database) of the most similar images, sorted the same way as the first list.
 * A status message, which says 'ok' if no error occurred in the search, and 'error' otherwise.
 
 
@@ -132,16 +136,23 @@ You can control the number of similar images returned by the environment variabl
 
   You can use the environment variable NPROB to balance between speed and accuracy. Its value has to be an integer between 1 and 100 (smaller value means faster search, with less accurate results). The recommended (default) value is 5.
 
-Updating
+Extending an existing Image Database
 ------------
 
-It might be desired to add more images to the image database in a running system. In this case, one can use the update function that preserves previously added images in the index, and adds the new images without retraining the images that are already in the image database.
+It might be desired to add more images to the image database in a running system. This section details the required steps to this this in an efficient manner. In particular, we provide an update function  this case, one can use the update function that preserves previously added images in the index, and adds the new images without retraining the images that are already in the image database.
 
-.. note::
+## Adding Images to the Image Database
 
-  Before the update function can be run, images have to be added to the docker volume (see Adding samples).
+The first step consists of adding the new images to the image database. This step is identical to the one explained above. That is, the images are added to the docker volume by sending a POST request to the following endpoint:
+::
 
-Once all the desired images have been added, one has to update the index. This can be done by sending a GET request to the following endpoint.
+  curl 127.0.0.1:5000/similarity/add?id=<unique_id> -X POST -F "data=@./your_img.jpg"
+
+where id is an optional argument. Without this argument, the system will generate a random ID number and return it as a response.
+
+## Updating the Similarity Search Approximator
+
+Once all the desired images have been added, one has to update the similarity search approximator. This can be done by sending a GET request to the following endpoint.
 ::
 
   curl 127.0.0.1:5000/similarity/update
@@ -153,6 +164,6 @@ The request above returns a json file with a task_id, which can be used to get s
 
 .. warning::
 
-  This step is computationally expensive. If the number of images is very large (e.g., more than 1 million), it may take several hours to process all images on a single GPU.
+  This step is very IO heavy. If the number of images is very large (e.g., more than 1 million), it may take several hours to process all images.
 
-Once the updating is complete, the similarity search will be performed on all images of the extended image database.
+Once the update of the similarity search approximator is complete, the similarity search will be performed on all images of the extended image database.
